@@ -9,129 +9,182 @@ const REQUIRED_FIELDS = [
   { key: 'education', label: 'education', question: 'Finally, could you share your educational background (degree, college)?' },
 ];
 
+// --- DATA SANITIZATION & NORMALIZATION ---
+function cleanName(raw: string): string {
+  if (!raw) return '';
+  const firstLine = raw.split('\n')[0].trim();
+  return firstLine
+    .replace(/\S+@\S+\.\S+/g, '')
+    .replace(/\d{10,}/g, '')
+    .replace(/[0-9@.]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 60);
+}
+
+function cleanEmail(raw: string): string {
+  if (!raw) return '';
+  const match = raw.match(/\S+@\S+\.\S+/);
+  return match ? match[0] : '';
+}
+
+function cleanPhone(raw: string): string {
+  if (!raw) return '';
+  const match = raw.match(/\d{10}/);
+  return match ? match[0] : '';
+}
+
+function cleanTargetRole(raw: string): string {
+  if (!raw) return '';
+  return raw.split('\n')[0].trim().substring(0, 100);
+}
+
+function cleanTextField(raw: string, maxLen: number = 500): string {
+  if (!raw) return '';
+  const lines = raw.split('\n');
+  const meaningful = lines.filter(line => {
+    const t = line.trim().toLowerCase();
+    if (t.length < 3) return false;
+    if (/^\d{10}$/.test(t)) return false;
+    if (/^\S+@\S+\.\S+$/.test(t)) return false;
+    return true;
+  });
+  return meaningful.join('\n').trim().substring(0, maxLen);
+}
+
+// STEP 1: Normalize keys
+function sanitizeCollected(raw: Record<string, string>): Record<string, string> {
+  const clean: Record<string, string> = { ...raw };
+  
+  if (clean.role && !clean.target_role) clean.target_role = clean.role;
+  if (clean.tools && !clean.skills) clean.skills = clean.tools;
+  if (clean.work && !clean.experience_or_projects) clean.experience_or_projects = clean.work;
+  if (clean.degree && !clean.education) clean.education = clean.degree;
+
+  if (clean.full_name) clean.full_name = cleanName(clean.full_name);
+  if (clean.email) clean.email = cleanEmail(clean.email);
+  if (clean.phone) clean.phone = cleanPhone(clean.phone);
+  if (clean.target_role) clean.target_role = cleanTargetRole(clean.target_role);
+  if (clean.skills) clean.skills = cleanTextField(clean.skills, 400);
+  if (clean.education) clean.education = cleanTextField(clean.education, 400);
+  if (clean.experience_or_projects) clean.experience_or_projects = cleanTextField(clean.experience_or_projects, 1000);
+  
+  return clean;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { session_id, user_input = '', collected = {}, round = 0 } = body;
     
-    console.log('[API PROXY] Processing workflow for session:', session_id);
+    console.log('[API PROXY] v3.1 Handshake Trigger:', session_id);
 
-    // Initial Supabase client
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // --- HEURISTIC EXTRACTION (Local Smart Detection) ---
-    const extracted: Record<string, any> = {};
+    // Extraction & Sanitization
+    const extracted: Record<string, string> = {};
     const input = user_input.toLowerCase();
 
-    // name: First line if input is long enough
     if (user_input.length > 5 && user_input.includes('\n')) {
       const firstLine = user_input.split('\n')[0].trim();
-      if (firstLine.length > 3 && firstLine.length < 50) {
-        extracted.full_name = firstLine;
-      }
+      if (firstLine.length > 3 && firstLine.length < 50) extracted.full_name = firstLine;
     }
 
-    // email/phone: Simple Regex
     const emailMatch = user_input.match(/\S+@\S+\.\S+/);
     if (emailMatch) extracted.email = emailMatch[0];
     const phoneMatch = user_input.match(/\d{10}/);
     if (phoneMatch) extracted.phone = phoneMatch[0];
 
-    // skills: Keyword detection
-    if (input.includes('java') || input.includes('react') || input.includes('sql') || input.includes('python') || input.includes('testing')) {
-       extracted.skills = user_input.substring(0, 200).trim(); // Partial extraction for safety
+    if (input.includes('skills') || input.includes('tools') || input.includes('react')) extracted.skills = user_input.trim();
+    if (input.includes('education') || input.includes('degree') || input.includes('university')) extracted.education = user_input.trim();
+    if (input.includes('experience') || input.includes('work') || input.includes('project')) extracted.experience_or_projects = user_input.trim();
+    if (input.includes('role') || input.includes('targeting')) {
+      extracted.target_role = user_input.split('\n')[0].replace(/role|targeting|position|is|i am/gi, '').trim();
     }
 
-    // education: College keywords
-    if (input.includes('college') || input.includes('university') || input.includes('school') || input.includes('b.tech') || input.includes('degree')) {
-       extracted.education = user_input.substring(0, 300).trim();
-    }
+    const mergedRaw = { ...collected, ...extracted };
+    const cleanedCollected = sanitizeCollected(mergedRaw);
 
-    // projects: Project keywords
-    if (input.includes('project') || input.includes('built') || input.includes('developed') || input.includes('forecasting')) {
-       extracted.experience_or_projects = user_input.substring(0, 500).trim();
-    }
-
-    let apData: any = {};
-    try {
-      // 1. Forward to ActivePieces for extraction/generation
-      const response = await fetch('https://cloud.activepieces.com/api/v1/webhooks/6ZRUJzIYQICVJLEVUmpjB', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (response.ok) {
-        const text = await response.text();
-        apData = text ? JSON.parse(text) : {};
-        console.log('[API PROXY] ActivePieces responded:', apData);
-      }
-    } catch (e) {
-      console.error('[API PROXY] ActivePieces connection failed.');
-    }
-
-    // 2. HARDENING: Re-fetch if async (Already implemented)
-    let finalData = apData;
-    const isPossiblyAsync = !apData.status || (apData.status === 'questions' && (!apData.response?.questions || apData.response.questions.length === 0));
-
-    if (isPossiblyAsync) {
-       console.log('[API PROXY] Attempting patience-fetch (Retry: 750ms)...');
-       await new Promise(resolve => setTimeout(resolve, 750)); 
-       const { data: dbSession } = await supabase.from('sessions').select('status, response, collected').eq('session_id', session_id).maybeSingle();
-       if (dbSession && dbSession.status && dbSession.status !== 'initial') {
-         finalData = { status: dbSession.status, response: dbSession.response || {}, collected: dbSession.collected || {} };
-       }
-    }
-
-    // 3. SMART DATA MERGE
-    const apResponse = finalData?.response || finalData || {};
-    const aiExtractedData = finalData?.collected || apResponse?.collected || {};
+    // Completion Threshold Check
+    const skillCount = cleanedCollected.skills ? cleanedCollected.skills.split('\n').length : 0;
+    const expCount = cleanedCollected.experience_or_projects ? cleanedCollected.experience_or_projects.split('\n').length : 0;
     
-    // Merge: HEURISTICS (Local) + AI (Upstream) + PREVIOUS (State)
-    const currentCollected = { ...collected, ...extracted, ...aiExtractedData };
-    
-    // Check missing fields in strict order
-    const nextMissing = REQUIRED_FIELDS.find(field => {
-      const val = currentCollected[field.key];
+    const isSufficient = 
+      cleanedCollected.full_name && 
+      cleanedCollected.target_role && 
+      skillCount >= 1 && 
+      expCount >= 1;
+
+    const nextMissing = REQUIRED_FIELDS.find((field) => {
+      const val = cleanedCollected[field.key];
       return !val || (typeof val === 'string' && val.trim().length < 3);
     });
 
-    // 4. SMART RESPONSE (SKIP REPETITION)
-    const filledCount = REQUIRED_FIELDS.filter(f => currentCollected[f.key]).length;
+    if (!nextMissing || (isSufficient && round > 2)) {
+      console.log('[API PROXY] Triggering Generator...');
+      
+      // DEEP-PERSIST: Update database before triggering generator to seal the session
+      await supabase.from('sessions').upsert({
+        session_id: session_id,
+        collected: cleanedCollected,
+        status: 'complete',
+        updated_at: new Date().toISOString()
+      });
 
-    if (!nextMissing) {
+      let apData: {
+        resume?: string;
+        status?: string;
+        collected?: Record<string, string>;
+        response?: { resume?: string; };
+      } = {};
+
+      try {
+        const response = await fetch('https://cloud.activepieces.com/api/v1/webhooks/6ZRUJzIYQICVJLEVUmpjB', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id, collected: cleanedCollected }),
+        });
+
+        if (response.ok) {
+          const text = await response.text();
+          apData = text ? JSON.parse(text) : {};
+        }
+      } catch {
+        console.error('[API PROXY] Generator timeout/faliure.');
+      }
+
+      const rawResume = apData?.response?.resume || apData?.resume || "";
+      const isValid = rawResume && rawResume.length > 50;
+
       return NextResponse.json({
         status: 'complete',
         response: {
           questions: [],
-          resume: apResponse.resume || finalData.resume || (typeof apResponse === 'string' ? apResponse : ''),
-          collected: currentCollected
+          resume: isValid ? rawResume : "",
+          collected: cleanedCollected,
+          ats_score: isValid ? 85 : 0
         }
       });
     }
 
-    // If we extracted a lot of stuff at once, give positive feedback
-    let questionText = nextMissing.question;
-    if (filledCount >= 3 && round === 0) {
-      questionText = `Great! I've captured most of your details from that resume. Just need a few more bits: ${nextMissing.question}`;
-    }
-
+    // Ask next question
     return NextResponse.json({
       status: 'questions',
       response: {
-        questions: [questionText],
-        collected: currentCollected
-      }
+        questions: [nextMissing.question],
+        collected: cleanedCollected
+      },
     });
 
-  } catch (error: any) {
-    console.error('[API PROXY] Critical internal error:', error);
+  } catch (error) {
+    const err = error as Error;
+    console.error('[API PROXY] Internal Error:', err.message);
     return NextResponse.json({
       status: 'questions',
-      response: { questions: ['I encountered a small hiccup. Could you tell me more about your experience or skills?'], error: error.message }
+      response: { questions: ['I encountered a small hiccup. Please try describing your experience once more.'], error: err.message }
     }, { status: 200 });
   }
 }
