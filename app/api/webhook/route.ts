@@ -3,7 +3,29 @@ import { createClient } from '@supabase/supabase-js';
 
 // --- FREEDOM FLOW v4.2: NO FIELD TRACKING ---
 
+interface ActivePiecesResponse {
+  response?: {
+    resume?: string;
+    suggested_roles?: string[];
+    recommended_courses?: string[];
+  };
+  resume?: string;
+  data?: {
+    resume?: string;
+    suggested_roles?: string[];
+    recommended_courses?: string[];
+  };
+  output?: string;
+  content?: string;
+  suggested_roles?: string[];
+  recommended_courses?: string[];
+}
+
 export async function POST(req: Request) {
+  // Use AbortController for internal timeouts
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout for API route
+
   try {
     const body = await req.json();
     const { session_id, user_input = '', collected = {} } = body;
@@ -36,7 +58,7 @@ export async function POST(req: Request) {
         updated_at: new Date().toISOString()
       });
 
-      let apData: any = {};
+      let apData: ActivePiecesResponse = {};
       try {
         const apPayload = { 
           session_id, 
@@ -49,10 +71,12 @@ export async function POST(req: Request) {
         
         console.log('[API PROXY] Triggering Webhook with payload:', JSON.stringify(apPayload).slice(0, 300) + '...');
 
+        // Apply timeout to external webhook call
         const response = await fetch('https://cloud.activepieces.com/api/v1/webhooks/6ZRUJzIYQICVJLEVUmpjB', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(apPayload),
+          signal: controller.signal
         });
 
         if (response.ok) {
@@ -63,8 +87,14 @@ export async function POST(req: Request) {
           const errText = await response.text();
           console.error('[API PROXY] Generator Failed | Status:', response.status, '| Msg:', errText);
         }
-      } catch (err) {
-        console.error('[API PROXY] Critical Fetch Error:', err);
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.error('[API PROXY] Webhook Timed Out after 25s');
+        } else {
+          console.error('[API PROXY] Critical Fetch Error:', err);
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       // v7.9 HYPER-EXTRACTION
@@ -75,7 +105,7 @@ export async function POST(req: Request) {
                         apData?.content ||
                         "";
       
-      const isValid = rawResume && rawResume.length > 50;
+      const isValid = !!(rawResume && rawResume.length > 50);
 
       // v7.8 SEAL COMPLETION: Only set complete if content is valid
       if (isValid) {
@@ -84,8 +114,8 @@ export async function POST(req: Request) {
           response: { 
             resume: rawResume, 
             ats_score: 85,
-            suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || [],
-            recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || []
+            suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || apData?.data?.suggested_roles || [],
+            recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || apData?.data?.recommended_courses || []
           },
           updated_at: new Date().toISOString()
         }).eq('session_id', session_id);
@@ -98,8 +128,8 @@ export async function POST(req: Request) {
           resume: isValid ? rawResume : "",
           collected: cleanedCollected,
           ats_score: isValid ? 85 : 0,
-          suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || [],
-          recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || []
+          suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || apData?.data?.suggested_roles || [],
+          recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || apData?.data?.recommended_courses || []
         }
       });
     }
@@ -114,6 +144,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error) {
+    clearTimeout(timeoutId);
     const err = error as Error;
     console.error('[API PROXY] Error:', err.message);
     return NextResponse.json({

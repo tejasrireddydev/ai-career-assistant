@@ -2,262 +2,332 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Bot, User, FileText, Send, Sparkles, Wand2, CheckCircle2, Terminal, Activity, FileCode, Loader2 } from "lucide-react";
+import { Sparkles, Wand2, Terminal, Activity, Plus, FileText, CheckCircle2, Star, ExternalLink, Briefcase, GraduationCap, ArrowRight } from "lucide-react";
 import ChatContainer from "@/components/ChatContainer";
 import ChatInput from "@/components/ChatInput";
 import Sidebar from "@/components/Sidebar";
 import ResumeSection from "@/components/ResumeSection";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 
 interface Message {
   role: "user" | "assistant";
   text: string;
 }
 
+interface SessionResponse {
+  resume: string;
+  ats_score?: number;
+  suggested_roles?: string[];
+  recommended_courses?: string[];
+  questions?: string[];
+  data?: {
+    collected?: Record<string, string>;
+    resume?: string;
+    ats_score?: number;
+    suggested_roles?: string[];
+    recommended_courses?: string[];
+    questions?: string[];
+  };
+  response?: {
+    resume?: string;
+    ats_score?: number;
+    suggested_roles?: string[];
+    recommended_courses?: string[];
+    questions?: string[];
+  };
+  collected?: Record<string, string>;
+  status?: string;
+}
+
 interface SessionData {
   session_id: string;
   status: string;
-  response: any;
+  response: SessionResponse;
   updated_at: string;
   messages?: Message[];
   collected?: Record<string, string>;
 }
 
-const INITIAL_MESSAGE = "Please describe your details in one paragraph including your name, target role, skills, projects or experience, and education.\n\nExample: My name is John Doe, I'm a Senior Frontend Developer specializing in React and TypeScript. I have 5 years of experience building scalable web apps with AWS. I graduated from Stanford with a Computer Science degree.";
+const INITIAL_MESSAGE = "Welcome to your AI Career Assistant. Tell me about your background, skills, and goals in a single paragraph, and I'll build your professional resume instantly.";
 
 const LOG_MILESTONES = [
-  { t: 0, log: "Handshaking with AI Gateway..." },
-  { t: 3, log: "Abstracting Professional Identity..." },
-  { t: 7, log: "Building Semantic Map of Skills..." },
-  { t: 12, log: "Drafting Core Experiences..." },
-  { t: 16, log: "Finalizing Document Formatting..." }
+  { t: 2, log: "📡 Establishing Neural Link..." },
+  { t: 5, log: "🧠 Analyzing Career DNA..." },
+  { t: 8, log: "📄 Synthesizing Professional Narrative..." },
+  { t: 12, log: "⚡ Optimizing ATS Vector Alignment..." },
+  { t: 15, log: "🛰️ Awaiting Final Background Sync..." },
 ];
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const [sessionId, setSessionId] = useState<string>("booting");
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("session") || uuidv4();
+    }
+    return "booting";
+  });
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [messages, setMessages] = useState<Message[]>([{ role: "assistant", text: INITIAL_MESSAGE }]);
   const [collected, setCollected] = useState<Record<string, string>>({});
   const [resume, setResume] = useState<string>("");
   const [atsScore, setAtsScore] = useState<number>(0);
+  const [suggestedRoles, setSuggestedRoles] = useState<string[]>([]);
+  const [recommendedCourses, setRecommendedCourses] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isComplete, setIsComplete] = useState<boolean>(false);
+  const [isError, setIsError] = useState<boolean>(false);
+  const [genLogs, setGenLogs] = useState<string[]>([]);
+
+  const supabase = useRef<ReturnType<typeof createClient> | null>(null);
+  const latestCollectedRef = useRef<Record<string, string>>({});
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSwitchingSessionRef = useRef<boolean>(false);
+  const hasInitializedRef = useRef<boolean>(false);
   
-  // v12.1: CENTRALIZED SANITIZER
+  const lastSavedStateRef = useRef<{ messagesStr: string; collectedStr: string; resume: string }>({ 
+    messagesStr: "", 
+    collectedStr: "", 
+    resume: "" 
+  });
+
   const sanitizeResume = useCallback((raw: string) => {
     if (!raw || typeof raw !== 'string') return { resume: "", roles: [], courses: [] };
-    
     let clean = raw;
     let roles: string[] = [];
     let courses: string[] = [];
 
     const careerMatch = clean.match(/(CAREER SUGGESTIONS|Career Suggestions|Career Suggestions:|CAREER PATHWAYS)[\s\S]*?(?=RECOMMENDED COURSES|Recommended Courses|Recommended Courses:|UPSKILLING ROADMAP|$)/i);
     if (careerMatch) {
-       roles = careerMatch[0].replace(/CAREER SUGGESTIONS|[:\[\]"]/gi, "")
+       roles = careerMatch[0].replace(/(CAREER SUGGESTIONS|Career Suggestions|Career Suggestions:|CAREER PATHWAYS|#|[:\[\]"])/gi, "")
          .split(/\n|,/)
-         .map((s: string) => s.trim())
-         .filter((s: string) => s.length > 3 && !s.includes("-"));
+         .map((s: string) => s.trim().replace(/^[-*•]\s+/, ""))
+         .filter((s: string) => s.length > 3);
     }
 
     const courseMatch = clean.match(/(RECOMMENDED COURSES|Recommended Courses|Recommended Courses:|UPSKILLING ROADMAP)[\s\S]*$/i);
     if (courseMatch) {
-       courses = courseMatch[0].replace(/RECOMMENDED COURSES|[:\[\]"]/gi, "")
+       courses = courseMatch[0].replace(/(RECOMMENDED COURSES|Recommended Courses|Recommended Courses:|UPSKILLING ROADMAP|#|[:\[\]"])/gi, "")
          .split(/\n|,/)
-         .map((s: string) => s.trim())
-         .filter((s: string) => s.length > 5 && !s.includes("-"));
+         .map((s: string) => s.trim().replace(/^[-*•]\s+/, ""))
+         .filter((s: string) => s.length > 5);
     }
 
-    // PURE STRIP
-    const careerRegex = /(CAREER SUGGESTIONS|Career Suggestions|Career Suggestions:|CAREER PATHWAYS)[\s\S]*$/i;
-    const coursesRegex = /(RECOMMENDED COURSES|Recommended Courses|Recommended Courses:|UPSKILLING ROADMAP)[\s\S]*$/i;
-    clean = clean.replace(careerRegex, "").replace(coursesRegex, "").trim();
+    const headers = [
+      "CAREER SUGGESTIONS", "Career Suggestions", "CAREER PATHWAYS", "Career Pathways",
+      "RECOMMENDED COURSES", "Recommended Courses", "UPSKILLING ROADMAP", "Upskilling Roadmap"
+    ];
+    
+    let earliestPos = -1;
+    headers.forEach(h => {
+      const pos = clean.indexOf(h);
+      if (pos !== -1 && (earliestPos === -1 || pos < earliestPos)) {
+        const mdPos = clean.lastIndexOf("#", pos);
+        if (mdPos !== -1 && pos - mdPos < 10) {
+           earliestPos = mdPos;
+        } else {
+           earliestPos = pos;
+        }
+      }
+    });
 
+    if (earliestPos !== -1) clean = clean.substring(0, earliestPos).trim();
     return { resume: clean, roles, courses };
   }, []);
-  
-  // v7.0 NEW STATES
-  const [suggestedRoles, setSuggestedRoles] = useState<string[]>([]);
-  const [recommendedCourses, setRecommendedCourses] = useState<string[]>([]);
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isComplete, setIsComplete] = useState<boolean>(false);
-  const [isError, setIsError] = useState<boolean>(false); // v11.0
-  const [genLogs, setGenLogs] = useState<string[]>([]);
-
-  const handleResubmit = () => {
-    if (collected.general) {
-      console.log("[v11.0] Quick-Resubmit Triggered:", collected.general);
-      handleSendMessage(collected.general);
-    }
-  };
-
-  const supabase = useRef<ReturnType<typeof createClient> | null>(null);
-  const latestCollectedRef = useRef<Record<string, string>>({});
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const fetchSessions = useCallback(async () => {
+  const fetchSessions = useCallback(async (signal?: AbortSignal) => {
     if (!supabase.current) return;
-    const { data } = await supabase.current.from("sessions").select("*").order("updated_at", { ascending: false });
-    if (data) setSessions(data);
+    try {
+      const { data } = await supabase.current.from("sessions").select("*").order("updated_at", { ascending: false }).abortSignal(signal as any);
+      if (data) setSessions(data as SessionData[]);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') console.error("Fetch Sessions Error:", err);
+    }
+  }, []);
+
+  // Centralized state updater to ensure consistency across Realtime, Polling, and API
+  const syncSessionState = useCallback((updated: SessionData) => {
+    if (!updated) return;
+    
+    // Update Messages if they've changed
+    if (updated.messages && JSON.stringify(updated.messages) !== JSON.stringify(messages)) {
+      setMessages(updated.messages);
+    }
+    
+    // Update Collected Data
+    if (updated.collected) setCollected(updated.collected);
+
+    const parsedResponse = (typeof updated.response === "string" ? JSON.parse(updated.response) : updated.response) as SessionResponse;
+    const resumeData = parsedResponse?.resume || parsedResponse?.data?.resume || parsedResponse?.response?.resume || "";
+    const score = parsedResponse?.ats_score || parsedResponse?.response?.ats_score;
+    const apiRoles = parsedResponse?.suggested_roles || parsedResponse?.data?.suggested_roles || parsedResponse?.response?.suggested_roles || [];
+    const apiCourses = parsedResponse?.recommended_courses || parsedResponse?.data?.recommended_courses || parsedResponse?.response?.recommended_courses || [];
+
+    if (resumeData && typeof resumeData === 'string' && resumeData.length > 50) {
+      const { resume: clean, roles, courses } = sanitizeResume(resumeData);
+      setResume(clean);
+      setAtsScore(score || 85);
+      setSuggestedRoles(roles.length > 0 ? roles : apiRoles);
+      setRecommendedCourses(courses.length > 0 ? courses : apiCourses);
+      
+      setIsLoading(false);
+      setIsComplete(true);
+      setIsError(false);
+    } else if (updated.status === 'complete' && !resumeData) {
+      // It's marked complete but no resume? Probably an extraction fail
+      setIsLoading(false);
+    } else if (updated.status === 'questions') {
+      setIsLoading(false);
+    }
+  }, [messages, sanitizeResume]);
+
+  const handleSelectSession = useCallback(async (sid: string) => {
+    if (!sid || sid === "booting" || !supabase.current) return;
+    isSwitchingSessionRef.current = true;
+    setSessionId(sid);
+    setIsLoading(false);
+    setIsComplete(false);
+    setIsError(false);
+    setGenLogs([]);
+    const { data } = await supabase.current.from("sessions").select("*").eq("session_id", sid).maybeSingle();
+    if (data) {
+      syncSessionState(data as SessionData);
+      lastSavedStateRef.current = { 
+        messagesStr: JSON.stringify(data.messages || []), 
+        collectedStr: JSON.stringify(data.collected || {}), 
+        resume: resume // Note: resume might be stale in this line but syncSessionState handles the state update
+      };
+    }
+    if (typeof window !== "undefined") window.history.pushState({}, "", `?session=${sid}`);
+    setTimeout(() => { isSwitchingSessionRef.current = false; }, 100);
+  }, [syncSessionState, sessionId, resume]);
+
+  const handleStartOver = useCallback(() => {
+    isSwitchingSessionRef.current = true;
+    const newId = uuidv4();
+    setSessionId(newId);
+    setMessages([{ role: "assistant", text: INITIAL_MESSAGE }]);
+    setCollected({}); setResume(""); setAtsScore(0); setSuggestedRoles([]); setRecommendedCourses([]); setIsComplete(false); setIsError(false); setIsLoading(false); setGenLogs([]);
+    lastSavedStateRef.current = { messagesStr: "", collectedStr: "", resume: "" };
+    if (typeof window !== "undefined") window.history.pushState({}, "", `?session=${newId}`);
+    setTimeout(() => { isSwitchingSessionRef.current = false; }, 100);
+  }, []);
+
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+    const controller = new AbortController();
+    supabase.current = createClient();
+    const initialize = async () => {
+      setMounted(true);
+      await fetchSessions(controller.signal);
+      let sId = sessionId;
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const urlId = params.get("session");
+        if (urlId) sId = urlId;
+      }
+      if (sId && sId !== "booting") handleSelectSession(sId);
+    };
+    initialize();
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const persistSession = useCallback(async () => {
     if (!sessionId || sessionId === "booting" || !supabase.current) return;
-    await supabase.current.from("sessions").upsert({
-      session_id: sessionId,
-      messages,
-      collected,
-      status: isComplete ? "complete" : "questions",
-      response: { 
-        resume, 
-        ats_score: atsScore,
-        suggested_roles: suggestedRoles,
-        recommended_courses: recommendedCourses 
-      },
-      updated_at: new Date().toISOString(),
-    });
-    if (!isComplete) await fetchSessions();
-  }, [sessionId, messages, collected, resume, atsScore, suggestedRoles, recommendedCourses, isComplete, fetchSessions]);
+    const messagesStr = JSON.stringify(messages);
+    const collectedStr = JSON.stringify(collected);
+    if (messagesStr === lastSavedStateRef.current.messagesStr && collectedStr === lastSavedStateRef.current.collectedStr && resume === lastSavedStateRef.current.resume) return;
+    try {
+      await supabase.current.from("sessions").upsert({
+        session_id: sessionId, messages, collected, status: isComplete ? "complete" : (isLoading ? "generating" : (resume && resume.length > 50 ? "complete" : "questions")),
+        response: { resume, ats_score: atsScore, suggested_roles: suggestedRoles, recommended_courses: recommendedCourses },
+        updated_at: new Date().toISOString(),
+      });
+      lastSavedStateRef.current = { messagesStr, collectedStr, resume };
+      await fetchSessions();
+    } catch (err) { console.error("Persist Session Error:", err); }
+  }, [sessionId, messages, collected, resume, atsScore, suggestedRoles, recommendedCourses, isComplete, isLoading, fetchSessions]);
 
   useEffect(() => {
-    if (!mounted || sessionId === "booting") return;
+    if (!mounted || sessionId === "booting" || isSwitchingSessionRef.current) return;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(persistSession, 500); // v8.0 TURBO-SYNC: 500ms
+    saveTimeoutRef.current = setTimeout(persistSession, 1200);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [messages, collected, persistSession, mounted, sessionId]);
+  }, [messages, collected, resume, persistSession, mounted, sessionId]);
 
-  // v9.0 REALTIME: Listen for backend updates instantly
+  // Realtime Sync Listener - Primary update mechanism
   useEffect(() => {
     if (!sessionId || sessionId === "booting" || !supabase.current) return;
-
-    console.log("[v9.0] Subscribing to Realtime updates for:", sessionId);
     const channel = supabase.current
       .channel(`session-${sessionId}-updates`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "sessions",
-          filter: `session_id=eq.${sessionId}`
-        },
-        async (payload) => {
-          console.log("[v9.0] 🔥 Incoming DB Update:", payload);
-          const updated = payload.new;
-          if (!updated) return;
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "sessions", filter: `session_id=eq.${sessionId}` }, (payload: { new: SessionData }) => {
+          syncSessionState(payload.new);
+      }).subscribe();
+    return () => { if (supabase.current) supabase.current.removeChannel(channel); };
+  }, [sessionId, syncSessionState]);
 
-          let parsedResponse = updated.response;
-          if (typeof parsedResponse === "string") {
-            try { parsedResponse = JSON.parse(parsedResponse); } 
-            catch (e) { console.error("[v9.0] JSON Parse Failed"); }
-          }
-
-          const resumeData = parsedResponse?.resume || parsedResponse?.response?.resume || "";
-          const score = parsedResponse?.ats_score || parsedResponse?.response?.ats_score;
-          
-          if (resumeData && typeof resumeData === 'string' && resumeData.length > 50) {
-            console.log("[v12.1] ✅ Syncing Realtime & Sanitizing...");
-            const { resume: clean, roles, courses } = sanitizeResume(resumeData);
-            
-            setResume(clean);
-            setAtsScore(score || 85);
-            
-            // v12.1: Merge extracted career data with existing
-            if (roles.length > 0) setSuggestedRoles(roles);
-            if (courses.length > 0) setRecommendedCourses(courses);
-            
-            setIsLoading(false);
-            setIsComplete(true);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      if (supabase.current) {
-        console.log("[v9.0] Unsubscribing from:", sessionId);
-        supabase.current.removeChannel(channel);
+  // Smart Polling Fallback - Secondary reliability layer (only runs while loading)
+  useEffect(() => {
+    if (!isLoading || !sessionId || sessionId === "booting" || !supabase.current) return;
+    
+    const interval = setInterval(async () => {
+      if (!supabase.current) return;
+      const { data } = await supabase.current.from("sessions").select("*").eq("session_id", sessionId).maybeSingle();
+      if (data) {
+        syncSessionState(data as SessionData);
       }
-    };
-  }, [sessionId]);
+    }, 4000); // Poll every 4s while loading as a safety net
+
+    return () => clearInterval(interval);
+  }, [isLoading, sessionId, syncSessionState]);
 
   useEffect(() => { latestCollectedRef.current = collected; }, [collected]);
 
-  const processResponse = (status: string, response: any) => {
+  const processResponse = useCallback((status: string, response: SessionResponse) => {
     try {
-      const parsed = typeof response === "string" ? JSON.parse(response) : response;
-      if (!parsed) {
-        if (status === 'questions') setIsLoading(false);
-        return;
-      }
-
+      const parsed = (typeof response === "string" ? JSON.parse(response) : response) as SessionResponse;
+      if (!parsed) { if (status === 'questions') setIsLoading(false); return; }
+      
       const apiData = parsed.collected || parsed.data?.collected;
       if (apiData) setCollected(prev => ({ ...prev, ...apiData }));
-
+      
       let resContent = parsed?.resume || parsed?.data?.resume || parsed?.response?.resume;
-      const score = parsed?.ats_score || parsed?.data?.ats_score || parsed?.response?.ats_score;
-      let roles = parsed?.suggested_roles || parsed?.data?.suggested_roles || parsed?.response?.suggested_roles || [];
-      let courses = parsed?.recommended_courses || parsed?.data?.recommended_courses || parsed?.response?.recommended_courses || [];
-      const questionsFromResponse = parsed?.questions || parsed?.data?.questions || parsed?.response?.questions || [];
-
-      // v12.1: UNIVERSAL SANITIZATION
-      const { resume: cleanRes, roles: extRoles, courses: extCourses } = sanitizeResume(resContent || "");
-      resContent = cleanRes;
-      if (roles.length === 0) roles = extRoles;
-      if (courses.length === 0) courses = extCourses;
-
       if (resContent && typeof resContent === 'string' && resContent.length > 50) {
-        setResume(resContent);
-        setAtsScore(score || 85);
-        setSuggestedRoles(roles.length > 0 ? roles : suggestedRoles);
-        setRecommendedCourses(courses.length > 0 ? courses : recommendedCourses);
-        
-        // v7.0 Fallback Inference
-        if (roles.length === 0 && (resContent.includes("Manual Testing") || resContent.includes("Selenium"))) {
-           setSuggestedRoles(["QA Engineer", "Automation Tester", "Software Test Engineer", "Quality Analyst"]);
-           setRecommendedCourses(["Selenium WebDriver Complete", "ISTQB Certification Prep", "Postman API Testing", "SQL for Testers"]);
-        } else if (roles.length === 0 && resContent.includes("JavaScript")) {
-           setSuggestedRoles(["Frontend Developer", "Web Developer", "React Specialist"]);
-           setRecommendedCourses(["Advanced JavaScript", "React.js Mastery", "Frontend System Design"]);
-        }
-
+        // Immediate update if API payload is rich
+        const { resume: cleanRes, roles, courses } = sanitizeResume(resContent);
+        setResume(cleanRes);
+        setAtsScore(parsed?.ats_score || parsed?.data?.ats_score || 85);
+        setSuggestedRoles(roles.length > 0 ? roles : (parsed?.suggested_roles || []));
+        setRecommendedCourses(courses.length > 0 ? courses : (parsed?.recommended_courses || []));
         setIsComplete(true);
-        setIsError(false); // Clear any previous error
+        setIsLoading(false);
         setMessages(prev => [...prev, { role: "assistant", text: "Your professional resume is generated!" }]);
-        
-        // v8.0 FLASH-SAVE: Immediate persistence on completion
         setTimeout(persistSession, 100);
       } else {
-        // v11.0: ENTER ERROR STATE
-        setIsError(true);
-        // v7.7 FALLBACK: If resume is empty, show questions OR a placeholder error
-        const finalQuestions = questionsFromResponse.length > 0 
-          ? questionsFromResponse 
-          : ["I'm having trouble extracting your resume content. Please try re-sending your details or check the system logs."];
-        
-        setMessages(prev => [...prev, ...finalQuestions.map((text: string) => ({ role: "assistant" as const, text }))]);
+        // Just questions, let the UI reflect them
+        const questionsFromResponse = parsed?.questions || parsed?.data?.questions || parsed?.response?.questions || [];
+        if (questionsFromResponse.length > 0) {
+           setIsLoading(false);
+           setMessages(prev => [...prev, ...questionsFromResponse.map((text: string) => ({ role: "assistant" as const, text }))]);
+        }
       }
-    } catch (e) {
-      console.error("[v7.0] API Parsing Fail:", e);
-    }
-  };
+    } catch (e) { console.error("API Parsing Fail:", e); setIsLoading(false); }
+  }, [sanitizeResume, persistSession]);
 
   useEffect(() => {
     let logInt: NodeJS.Timeout | null = null;
-    let start = Date.now();
-    
+    const start = Date.now();
     if (isLoading && !isComplete) {
-       setGenLogs(prev => prev.length === 0 ? ["Initializing Digital Handshake..."] : prev);
        logInt = setInterval(() => {
           const elapsed = (Date.now() - start) / 1000;
           setGenLogs(prev => {
              const m = LOG_MILESTONES.find(milestone => milestone.t <= elapsed && !prev.includes(milestone.log));
              const nextLogs = m ? [...prev, m.log] : prev;
-             
-             // v9.1: Add the "Syncing" indicator if we've reached the last milestone but aren't done yet
-             if (elapsed > 16 && !nextLogs.includes("🛰️ Awaiting Final Background Sync...")) {
-                return [...nextLogs, "🛰️ Awaiting Final Background Sync..."];
-             }
+             if (elapsed > 16 && !nextLogs.includes("🛰️ Awaiting Final Background Sync...")) return [...nextLogs, "🛰️ Awaiting Final Background Sync..."];
              return nextLogs;
           });
        }, 1000);
@@ -267,216 +337,145 @@ export default function Home() {
 
   const handleSendMessage = async (userInput: string) => {
     if (!userInput.trim() || isLoading) return;
-    
     const newCollected = { ...latestCollectedRef.current, general: userInput.trim() };
-    setCollected(newCollected);
-    setMessages(prev => [...prev, { role: "user", text: userInput }]);
-    setIsLoading(true);
-    setIsError(false);
-    setGenLogs([]);
-    setIsComplete(false); 
-
+    setCollected(newCollected); setMessages(prev => [...prev, { role: "user", text: userInput }]);
+    setIsLoading(true); setIsError(false); setGenLogs(["Initializing Digital Handshake..."]); setIsComplete(false); 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 40000);
     try {
-      const res = await fetch("/api/webhook", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, user_input: userInput, collected: newCollected }),
-      });
+      const res = await fetch("/api/webhook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, user_input: userInput, collected: newCollected }), signal: controller.signal });
+      clearTimeout(timeoutId);
       const data = await res.json();
-      
-      // v12.0: Only process if it's a "questions" status (immediate response needed)
-      // Otherwise, the Realtime listener in app/page.tsx will catch the "complete" update.
-      if (data.status === 'questions') {
+      if (data.status === 'questions' || data.status === 'complete' || data.status === 'error') {
         processResponse(data.status, data.response);
-      } else {
-        console.log("[v12.0] Trigger success. Waiting for Realtime sync...");
-        // DO NOT set isLoading(false) here. 
       }
-    } catch (error) {
-       console.error("[v12.0] Trigger failed:", error);
-       setIsLoading(false);
-       setIsError(true);
+    } catch (err: any) { 
+      clearTimeout(timeoutId); setIsLoading(false); 
+      if (err.name === 'AbortError') { setIsError(true); setMessages(prev => [...prev, { role: "assistant", text: "Request timed out after 40 seconds." }]); }
+      else { setIsError(true); }
     }
   };
 
-  const handleSelectSession = useCallback(async (sid: string) => {
-    if (!sid || sid === "booting" || !supabase.current) return;
-    setSessionId(sid);
-    const { data } = await supabase.current.from("sessions").select("*").eq("session_id", sid).maybeSingle();
-    if (data) {
-      setMessages(data.messages || []);
-      setCollected(data.collected || {});
-      try {
-        const resp = typeof data.response === 'string' ? JSON.parse(data.response) : data.response;
-        const resText = resp?.resume || "";
-        
-        // v12.1: Always sanitize historical resumes on load
-        const { resume: clean, roles, courses } = sanitizeResume(resText);
-        
-        setResume(clean);
-        setAtsScore(resp?.ats_score || 0);
-        // v7.0 Load Career Data
-        setSuggestedRoles(roles.length > 0 ? roles : (resp?.suggested_roles || []));
-        setRecommendedCourses(courses.length > 0 ? courses : (resp?.recommended_courses || []));
-      } catch (e) {
-        setResume(""); setAtsScore(0); setSuggestedRoles([]); setRecommendedCourses([]);
-      }
-      setIsComplete(data.status === "complete");
-    }
-  }, []);
-
-  const handleStartOver = () => {
-    const newId = uuidv4();
-    setSessionId(newId);
-    setIsComplete(false); setResume(""); setAtsScore(0); setCollected({});
-    setSuggestedRoles([]); setRecommendedCourses([]);
-    setGenLogs([]);
-    setMessages([{ role: "assistant", text: INITIAL_MESSAGE }]);
-    window.history.pushState({}, "", `?session=${newId}`);
+  const parseRoadmap = (course: string) => {
+    const urlMatch = course.match(/https?:\/\/[^\s|]+/g);
+    const url = urlMatch ? urlMatch[0] : null;
+    const cleanText = course.replace(/https?:\/\/[^\s|]+/g, "").replace(/\|/g, " ").trim();
+    return { url, text: cleanText };
   };
 
-  useEffect(() => {
-    supabase.current = createClient();
-    if (typeof window !== "undefined") {
-      const sid = new URLSearchParams(window.location.search).get("session");
-      if (sid) handleSelectSession(sid); else setSessionId(uuidv4());
-    }
-    fetchSessions();
-    setMounted(true);
-  }, [fetchSessions, handleSelectSession]);
-
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isLoading]);
-
-  if (!mounted) return <div className="h-screen w-screen bg-white" />;
+  if (!mounted) return <div className="h-screen w-screen bg-[#f8fafc]" />;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#f8fafc] font-sans selection:bg-blue-100 selection:text-blue-900">
       <Sidebar sessions={sessions} currentSessionId={sessionId} onSelectSession={handleSelectSession} onNewChat={handleStartOver} onDeleteSession={(sid) => { if (!supabase.current) return; supabase.current.from("sessions").delete().eq("session_id", sid).then(() => { if (sid === sessionId) handleStartOver(); fetchSessions(); }); }} />
-
-      <main className="flex-1 flex flex-row min-h-screen relative overflow-hidden">
-        <div className="flex flex-col min-h-0 bg-transparent border-r border-slate-200 w-full sm:w-[450px] lg:w-[500px] shrink-0 relative">
-          <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-zinc-100 px-6 py-5 flex items-center justify-between shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white"><FileCode className="w-5 h-5" /></div>
-              <h1 className="text-xl font-black uppercase">AI<span className="text-blue-600">Resume</span></h1>
-            </div>
-            <div className="px-3 py-1.5 bg-blue-50/50 border border-blue-100 rounded-full flex items-center gap-2">
-               <Activity className="w-2 h-2 text-blue-600 animate-pulse" />
-               <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none underline tracking-tighter">Horizon_v7.0</span>
-            </div>
+      <main className="flex-1 flex flex-col md:flex-row h-full relative overflow-hidden">
+        <div className="flex flex-col w-full md:w-[420px] border-r border-slate-200 bg-white z-10">
+          <header className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur-xl sticky top-0 z-20">
+            <h1 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2"><div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center"><Wand2 className="w-4 h-4 text-white" /></div>AI Resume Builder</h1>
+            {isComplete && <button onClick={handleStartOver} className="p-2 hover:bg-slate-50 rounded-xl text-slate-400 hover:text-blue-600"><Plus className="w-5 h-5" /></button>}
           </header>
-
-          <div className="flex-1 overflow-y-auto no-scrollbar pb-32">
-            <ChatContainer messages={messages} onResendMessage={(i) => handleSendMessage(messages[i].text)} />
-            <div ref={messagesEndRef} />
-          </div>
-
-          <div className="sticky bottom-0 p-4 bg-gradient-to-t from-white via-white to-transparent font-outfit">
-            <div className="max-w-3xl mx-auto flex flex-col gap-4">
-              {resume && resume.trim().length > 0 && !isLoading && (
-                <div className="bg-emerald-50/80 backdrop-blur-sm border border-emerald-100 px-6 py-3 rounded-2xl text-center shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
-                  <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex items-center justify-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Professional Version Ready for Export
-                  </p>
-                </div>
-              )}
-
-              {isLoading ? (
-                <div className="flex flex-col gap-4 animate-in fade-in duration-500">
-                  <div className="bg-zinc-900/95 backdrop-blur-xl p-6 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden border border-white/10 group">
-                    <div className="relative z-10 flex flex-col gap-4">
-                       <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 flex items-center gap-2">
-                             <Terminal className="w-3 h-3" /> Career Engine (Active)
-                          </p>
+          <div className="flex-1 flex flex-col overflow-hidden relative">
+            <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scroll-smooth no-scrollbar">
+               <ChatContainer messages={messages} />
+               {isLoading && genLogs.length > 0 && (
+                 <div className="space-y-4 pt-4">
+                    <div className="p-5 bg-slate-900 rounded-[2rem] text-white shadow-2xl relative overflow-hidden border border-white/10">
+                       <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 flex items-center gap-2"><Terminal className="w-3 h-3" /> Orchestrator v14.0</p>
                           <Activity className="w-3 h-3 text-emerald-500 animate-pulse" />
                        </div>
-                       <div className="flex flex-col gap-1.5 min-h-[80px] max-h-[120px] overflow-y-auto font-mono text-[9px] text-zinc-300 scrollbar-hide">
-                          {genLogs.map((log, i) => (
-                             <div key={i} className="flex gap-3 opacity-0 animate-in fade-in duration-300" style={{ animationFillMode: 'forwards' }}>
-                                <span className="text-zinc-600">[{new Date().toLocaleTimeString([], { hour12: false, second: '2-digit' })}]</span>
-                                <span>{log}</span>
-                             </div>
-                          ))}
-                          <div className="flex items-center gap-2 text-blue-400 animate-pulse"><span>_</span></div>
+                       <div className="space-y-2 max-h-[150px] overflow-y-auto scroll-smooth no-scrollbar">
+                          {genLogs.map((log, i) => (<div key={i} className="flex gap-3 text-[10px] font-mono text-slate-400 animate-in fade-in slide-in-from-left-2 duration-300"><span>{log}</span></div>))}
                        </div>
                     </div>
-                  </div>
+                 </div>
+               )}
+               <div ref={messagesEndRef} />
+            </div>
+            <div className="p-6 bg-white border-t border-slate-100 relative shadow-sm">
+              {isError ? (
+                <div className="p-6 bg-red-50 rounded-3xl border border-red-100 flex flex-col gap-4 animate-in zoom-in-95 duration-300 text-center">
+                  <p className="text-xs font-bold text-red-700 uppercase tracking-widest">Generation stalled or content missing</p>
+                  <button onClick={() => { if (collected.general) handleSendMessage(collected.general); }} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-red-200">Re-Trigger AI Generator</button>
                 </div>
-              ) : isError ? (
-                <div className="p-6 bg-red-50 border-t border-red-100 flex flex-col gap-4 animate-in fade-in duration-500">
-                  <p className="text-xs font-bold text-red-700 uppercase tracking-widest text-center">Generation stalled or content missing</p>
-                  <button 
-                    onClick={handleResubmit}
-                    className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-3"
-                  >
-                    <Wand2 className="w-5 h-5" />
-                    Re-Trigger AI Generator
-                  </button>
-                  <button 
-                    onClick={() => setIsError(false)}
-                    className="text-[10px] font-bold text-red-400 uppercase hover:text-red-600 transition-colors"
-                  >
-                    Go back to chat
-                  </button>
-                </div>
-              ) : (
-                <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
-              )}
+              ) : <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />}
             </div>
           </div>
         </div>
-
-        <div className="flex-grow h-full overflow-y-auto bg-slate-50 min-w-[600px] scroll-smooth p-6">
-          <ResumeSection 
-            key={resume ? resume.slice(0, 5) : "empty"} 
-            resume={resume} 
-            atsScore={atsScore} 
-          />
-
-          {/* v10.0 CAREER HORIZON SECTION (OUTSIDE RESUME) */}
-          {(suggestedRoles.length > 0 || recommendedCourses.length > 0) && (
-            <div className="max-w-[800px] mx-auto mt-12 mb-20 px-4 md:px-0 flex flex-col gap-8 animate-in slide-in-from-bottom-8 duration-1000">
-              <div className="flex flex-col gap-2 mb-2">
-                <h2 className="text-xl font-black text-zinc-900 tracking-tighter uppercase">Career Horizon</h2>
-                <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Growth Pathway & Strategic Upskilling</p>
+        <div className="flex-1 h-full overflow-y-auto bg-[#f8fafc] no-scrollbar">
+          {!resume && !isLoading ? (
+             <div className="h-full flex flex-col items-center justify-center p-12 text-center space-y-6">
+                <div className="w-24 h-24 bg-white rounded-[2.5rem] shadow-sm flex items-center justify-center"><FileText className="w-10 h-10 text-slate-100" /></div>
+                <h3 className="text-xl font-black text-slate-900 tracking-tight">Your Resume Preview</h3>
+             </div>
+          ) : (
+            <div className="p-6 md:p-12 space-y-20 max-w-[1200px] mx-auto">
+              {isComplete && !isLoading && (
+                <div className="flex items-center justify-center gap-3 py-4 px-8 bg-emerald-50 text-emerald-700 rounded-3xl border border-emerald-100 shadow-sm animate-in slide-in-from-top-4 duration-700 mx-auto w-fit">
+                   <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center text-white"><CheckCircle2 className="w-5 h-5" /></div>
+                   <span className="text-xs font-black uppercase tracking-widest">Your professional resume is ready 👇</span>
+                </div>
+              )}
+              <div id="resume-container">
+                <ResumeSection resume={resume} atsScore={atsScore} />
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Suggested Roles Card */}
-                {suggestedRoles.length > 0 && (
-                  <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-xl shadow-zinc-200/50 flex flex-col h-full hover:shadow-2xl transition-shadow duration-500">
-                    <h3 className="text-[10px] font-black text-blue-600 mb-6 uppercase tracking-[0.2em] flex items-center gap-3">
-                      <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
-                      Recommended Pathways
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {suggestedRoles.map((role, i) => (
-                        <span key={i} className="px-4 py-2 bg-blue-50 text-blue-700 text-[11px] font-black rounded-2xl border border-blue-100/50 hover:bg-blue-100 transition-colors cursor-default">
-                          {role}
-                        </span>
-                      ))}
+              {(suggestedRoles.length > 0 || recommendedCourses.length > 0) && (
+                <section className="flex flex-col gap-12 pb-40 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+                  <div className="flex items-center gap-6">
+                    <div className="flex flex-col">
+                       <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Horizon Insights</h2>
+                       <div className="h-2 w-32 bg-blue-600 rounded-full mt-2" />
                     </div>
+                    <div className="flex-1 h-px bg-slate-200" />
                   </div>
-                )}
-
-                {/* Recommended Courses Card */}
-                {recommendedCourses.length > 0 && (
-                  <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-xl shadow-zinc-200/50 flex flex-col h-full hover:shadow-2xl transition-shadow duration-500">
-                    <h3 className="text-[10px] font-black text-emerald-600 mb-6 uppercase tracking-[0.2em] flex items-center gap-3">
-                      <span className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse" />
-                      Upskilling Roadmap
-                    </h3>
-                    <ul className="space-y-4">
-                      {recommendedCourses.map((course, i) => (
-                        <li key={i} className="flex items-start gap-3 group">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                          <span className="text-[11px] font-bold text-zinc-700 leading-tight group-hover:text-emerald-900 transition-colors">{course}</span>
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                    {suggestedRoles.length > 0 && (
+                      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-[0_20px_60px_-15px_rgba(37,99,235,0.06)] relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-40 h-40 bg-blue-50 rounded-full -mr-20 -mt-20 group-hover:scale-110 transition-transform duration-700" />
+                        <div className="relative z-10">
+                           <div className="flex items-center justify-between mb-12">
+                              <h3 className="text-xs font-black text-blue-600 uppercase tracking-[0.3em] flex items-center gap-4"><Briefcase className="w-4 h-4" />Recommended Roles</h3>
+                           </div>
+                           <div className="grid grid-cols-1 gap-3">
+                             {suggestedRoles.map((role, i) => (
+                               <div key={i} className="flex items-center justify-between p-5 bg-slate-50/50 hover:bg-white hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1 rounded-2xl border border-slate-100 transition-all duration-500 cursor-default group/item">
+                                 <span className="text-sm font-black text-slate-800">{role}</span>
+                                 <ArrowRight className="w-4 h-4 text-slate-300 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all" />
+                               </div>
+                             ))}
+                           </div>
+                        </div>
+                      </div>
+                    )}
+                    {recommendedCourses.length > 0 && (
+                      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-[0_20px_60px_-15px_rgba(16,185,129,0.06)] relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-50 rounded-full -mr-20 -mt-20 group-hover:scale-110 transition-transform duration-700" />
+                        <div className="relative z-10">
+                           <div className="flex items-center justify-between mb-12">
+                              <h3 className="text-xs font-black text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-4"><GraduationCap className="w-4 h-4" />Growth Roadmap</h3>
+                           </div>
+                           <div className="space-y-6">
+                             {recommendedCourses.map((course, i) => {
+                               const { url, text } = parseRoadmap(course);
+                               return (
+                                 <div key={i} className="flex flex-col gap-4 p-6 bg-[#f8fafc] hover:bg-white hover:shadow-xl hover:shadow-emerald-500/5 rounded-[2rem] border border-slate-100 transition-all duration-500 group/course">
+                                   <div className="flex items-start gap-4">
+                                      <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center shrink-0"><Star className={cn("w-4 h-4", i === 0 ? "text-amber-400 fill-amber-400" : "text-emerald-500")} /></div>
+                                      <div className="flex-1 pt-1"><span className="text-sm font-black text-slate-900 leading-tight block mb-1">{text}</span><div className="flex items-center gap-4"><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-emerald-500 rounded-full" />Highly Selective</span><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-slate-300 rounded-full" />Industry Pick</span></div></div>
+                                   </div>
+                                   {url && (
+                                     <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-3 bg-white hover:bg-emerald-600 hover:text-white text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-emerald-100 hover:border-emerald-600 group/link shadow-sm">Explore Resource <ExternalLink className="w-3 h-3 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" /></a>
+                                   )}
+                                 </div>
+                               );
+                             })}
+                           </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </section>
+              )}
             </div>
           )}
         </div>

@@ -1,20 +1,16 @@
 "use client";
 
 import React, { useState } from "react";
-import { Download, FileText, CheckCircle, Percent, Loader2 } from "lucide-react";
+import { Download, FileText, Percent, Loader2, Copy } from "lucide-react";
 
 interface ResumeSectionProps {
   resume: string;
   atsScore: number;
-  suggestedRoles?: string[];
-  recommendedCourses?: string[];
 }
 
 export default function ResumeSection({ 
   resume, 
-  atsScore,
-  suggestedRoles = [],
-  recommendedCourses = []
+  atsScore
 }: ResumeSectionProps) {
   const [isExporting, setIsExporting] = useState(false);
 
@@ -108,36 +104,50 @@ export default function ResumeSection({
   };
 
   return (
-    <div className="h-full flex flex-col animate-in slide-in-from-right-4 duration-700 font-outfit">
-      <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-zinc-100 px-8 py-5 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-100" style={{ backgroundColor: '#f0fdf4', color: COLORS.EMERALD_ACCENT }}>
-             <CheckCircle className="w-3.5 h-3.5" />
-             <span className="text-[10px] font-black uppercase tracking-widest leading-none">ColorSafe_v6.1</span>
-          </div>
+    <div className="h-full flex flex-col animate-in slide-in-from-right-8 duration-1000 font-sans">
+      <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-slate-100 px-6 py-5 flex items-center justify-between">
+        <div className="flex flex-col">
+           <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
+             <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+             Live Document Preview
+           </h3>
+           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Real-time AI Sync Active</p>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4">
           <div className="flex flex-col items-end">
-             <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">ATS Compatibility</span>
-             <span className="text-base font-black flex items-center gap-1" style={{ color: COLORS.EMERALD_ACCENT }}>
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">ATS Sync Score</span>
+             <span className="text-lg font-black flex items-center gap-1 text-emerald-600 tracking-tighter">
                 {atsScore} <Percent className="w-3.5 h-3.5" />
              </span>
           </div>
-          <button 
-            onClick={exportPDF} 
-            disabled={isExporting}
-            className="flex items-center gap-2 px-5 py-2.5 bg-zinc-900 text-white rounded-xl text-xs font-bold hover:bg-black transition-all active:scale-95 shadow-lg shadow-zinc-200 disabled:opacity-50"
-          >
-            {isExporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-            Export PDF
-          </button>
+
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText(resume);
+                alert("Resume copied to clipboard!");
+              }} 
+              className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all active:scale-95 border border-slate-100"
+              title="Copy to Clipboard"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={exportPDF} 
+              disabled={isExporting}
+              className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-200 disabled:opacity-50"
+            >
+              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Download PDF
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 bg-zinc-50 p-8 sm:p-12 overflow-y-auto no-scrollbar">
+      <div className="flex-1 bg-slate-50/50 p-4 sm:p-8 lg:p-12 overflow-y-auto no-scrollbar">
         <div 
           id="resume-to-render"
-          className="max-w-[800px] mx-auto bg-white shadow-2xl shadow-zinc-200 min-h-[1100px] p-12 sm:p-16 border border-zinc-100 rounded-sm"
+          className="max-w-[850px] mx-auto bg-white shadow-[0_40px_100px_rgba(0,0,0,0.05)] min-h-[1100px] p-12 sm:p-20 border border-slate-100 rounded-[2.5rem]"
           style={{ backgroundColor: '#ffffff', color: COLORS.TEXT_DARK }}
         >
           {rawLines.map((line, i) => {

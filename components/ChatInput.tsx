@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, CornerDownLeft } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
 interface ChatInputProps {
@@ -40,7 +40,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     <div className="w-full transition-all duration-300">
       <form 
         onSubmit={handleSubmit} 
-        className="relative group bg-white dark:bg-zinc-900 rounded-[1.5rem] border border-zinc-200 dark:border-zinc-800 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all p-2 flex flex-col gap-1"
+        className="relative group bg-white rounded-[2rem] border border-slate-100 shadow-[0_20px_50px_rgba(37,99,235,0.06)] focus-within:ring-4 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all p-2 flex flex-col gap-1 overflow-hidden"
       >
         <textarea
           ref={textareaRef}
@@ -52,28 +52,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
               handleSubmit();
             }
           }}
-          placeholder="Type or paste your professional details..."
+          placeholder="My name is..., I am a BTech student..., I specialize in..., I have experience with..., My projects are..."
           disabled={isLoading}
           rows={3}
-          className="w-full bg-transparent px-4 py-3 text-sm font-medium text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none resize-none min-h-[90px] max-h-[350px] overflow-y-auto scrollbar-hide block leading-relaxed"
+          className="w-full bg-transparent px-6 py-5 text-sm font-black text-slate-800 placeholder:text-slate-300 focus:outline-none resize-none min-h-[120px] max-h-[400px] overflow-y-auto no-scrollbar block leading-relaxed selection:bg-blue-100"
         />
         
-        <div className="flex items-center justify-between px-4 pb-2">
-            <div className="flex items-center gap-4 text-xs font-bold text-zinc-400 tracking-wide uppercase">
-               <span className="flex items-center gap-1.5"><CornerDownLeft size={12}/> Enter to send</span>
-               <span className="opacity-40">•</span>
-               <span>Shift+Enter for newline</span>
-            </div>
-
+        <div className="flex items-center justify-end px-4 pb-4">
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
               className={cn(
-                "rounded-full bg-blue-600 p-3.5 text-white transition-all shadow-lg active:scale-95 disabled:opacity-30 disabled:scale-100 disabled:shadow-none",
-                input.trim() && !isLoading ? "hover:bg-blue-700 hover:shadow-blue-500/20" : ""
+                "w-12 h-12 rounded-2xl bg-blue-600 text-white transition-all shadow-xl shadow-blue-200 active:scale-95 disabled:opacity-20 disabled:scale-90 disabled:shadow-none flex items-center justify-center",
+                input.trim() && !isLoading ? "hover:bg-blue-700 hover:-translate-y-1" : ""
               )}
             >
-              <Send size={20} className={cn("transition-transform duration-300", input.trim() && !isLoading ? "translate-x-0" : "scale-75")} />
+              <Send size={20} className={cn("transition-transform duration-500", input.trim() && !isLoading ? "translate-x-0 rotate-0" : "-translate-x-4 -rotate-45")} />
             </button>
         </div>
       </form>
