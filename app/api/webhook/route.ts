@@ -1,190 +1,124 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const REQUIRED_FIELDS = [
-  { key: 'full_name', label: 'full name', question: 'Could you please provide your full name?' },
-  { key: 'target_role', label: 'target role', question: 'What role or position are you targeting?' },
-  { key: 'skills', label: 'skills', question: 'What are your core technical skills or expertise?' },
-  { key: 'experience_or_projects', label: 'projects or experience', question: 'Could you share 1–2 projects or work experiences you\'ve had?' },
-  { key: 'education', label: 'education', question: 'Finally, could you share your educational background (degree, college)?' },
-];
-
-// --- DATA SANITIZATION & NORMALIZATION ---
-function cleanName(raw: string): string {
-  if (!raw) return '';
-  const firstLine = raw.split('\n')[0].trim();
-  return firstLine
-    .replace(/\S+@\S+\.\S+/g, '')
-    .replace(/\d{10,}/g, '')
-    .replace(/[0-9@.]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .substring(0, 60);
-}
-
-function cleanEmail(raw: string): string {
-  if (!raw) return '';
-  const match = raw.match(/\S+@\S+\.\S+/);
-  return match ? match[0] : '';
-}
-
-function cleanPhone(raw: string): string {
-  if (!raw) return '';
-  const match = raw.match(/\d{10}/);
-  return match ? match[0] : '';
-}
-
-function cleanTargetRole(raw: string): string {
-  if (!raw) return '';
-  return raw.split('\n')[0].trim().substring(0, 100);
-}
-
-function cleanTextField(raw: string, maxLen: number = 500): string {
-  if (!raw) return '';
-  const lines = raw.split('\n');
-  const meaningful = lines.filter(line => {
-    const t = line.trim().toLowerCase();
-    if (t.length < 3) return false;
-    if (/^\d{10}$/.test(t)) return false;
-    if (/^\S+@\S+\.\S+$/.test(t)) return false;
-    return true;
-  });
-  return meaningful.join('\n').trim().substring(0, maxLen);
-}
-
-// STEP 1: Normalize keys
-function sanitizeCollected(raw: Record<string, string>): Record<string, string> {
-  const clean: Record<string, string> = { ...raw };
-  
-  if (clean.role && !clean.target_role) clean.target_role = clean.role;
-  if (clean.tools && !clean.skills) clean.skills = clean.tools;
-  if (clean.work && !clean.experience_or_projects) clean.experience_or_projects = clean.work;
-  if (clean.degree && !clean.education) clean.education = clean.degree;
-
-  if (clean.full_name) clean.full_name = cleanName(clean.full_name);
-  if (clean.email) clean.email = cleanEmail(clean.email);
-  if (clean.phone) clean.phone = cleanPhone(clean.phone);
-  if (clean.target_role) clean.target_role = cleanTargetRole(clean.target_role);
-  if (clean.skills) clean.skills = cleanTextField(clean.skills, 400);
-  if (clean.education) clean.education = cleanTextField(clean.education, 400);
-  if (clean.experience_or_projects) clean.experience_or_projects = cleanTextField(clean.experience_or_projects, 1000);
-  
-  return clean;
-}
+// --- FREEDOM FLOW v4.2: NO FIELD TRACKING ---
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { session_id, user_input = '', collected = {}, round = 0 } = body;
+    const { session_id, user_input = '', collected = {} } = body;
     
-    console.log('[API PROXY] v3.1 Handshake Trigger:', session_id);
+    console.log('[API PROXY] v4.2 Freedom Trigger:', session_id);
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Extraction & Sanitization
-    const extracted: Record<string, string> = {};
-    const input = user_input.toLowerCase();
+    // One-shot extraction: AI handles the paragraph
+    const cleanedCollected = { 
+       ...collected, 
+       general: user_input.trim(),
+       last_update: new Date().toISOString()
+    };
 
-    if (user_input.length > 5 && user_input.includes('\n')) {
-      const firstLine = user_input.split('\n')[0].trim();
-      if (firstLine.length > 3 && firstLine.length < 50) extracted.full_name = firstLine;
-    }
+    // Threshold for generation: Any significant paragraph triggers the builder
+    const isMeaningful = user_input.trim().split(/\s+/).length >= 5;
 
-    const emailMatch = user_input.match(/\S+@\S+\.\S+/);
-    if (emailMatch) extracted.email = emailMatch[0];
-    const phoneMatch = user_input.match(/\d{10}/);
-    if (phoneMatch) extracted.phone = phoneMatch[0];
-
-    if (input.includes('skills') || input.includes('tools') || input.includes('react')) extracted.skills = user_input.trim();
-    if (input.includes('education') || input.includes('degree') || input.includes('university')) extracted.education = user_input.trim();
-    if (input.includes('experience') || input.includes('work') || input.includes('project')) extracted.experience_or_projects = user_input.trim();
-    if (input.includes('role') || input.includes('targeting')) {
-      extracted.target_role = user_input.split('\n')[0].replace(/role|targeting|position|is|i am/gi, '').trim();
-    }
-
-    const mergedRaw = { ...collected, ...extracted };
-    const cleanedCollected = sanitizeCollected(mergedRaw);
-
-    // Completion Threshold Check
-    const skillCount = cleanedCollected.skills ? cleanedCollected.skills.split('\n').length : 0;
-    const expCount = cleanedCollected.experience_or_projects ? cleanedCollected.experience_or_projects.split('\n').length : 0;
-    
-    const isSufficient = 
-      cleanedCollected.full_name && 
-      cleanedCollected.target_role && 
-      skillCount >= 1 && 
-      expCount >= 1;
-
-    const nextMissing = REQUIRED_FIELDS.find((field) => {
-      const val = cleanedCollected[field.key];
-      return !val || (typeof val === 'string' && val.trim().length < 3);
-    });
-
-    if (!nextMissing || (isSufficient && round > 2)) {
-      console.log('[API PROXY] Triggering Generator...');
+    if (isMeaningful) {
+      console.log('[API PROXY] One-shot sufficient. Triggering Generator...');
       
-      // DEEP-PERSIST: Update database before triggering generator to seal the session
+      // v7.8 START GENERATION: Set state to generating first
       await supabase.from('sessions').upsert({
         session_id: session_id,
         collected: cleanedCollected,
-        status: 'complete',
+        status: 'generating',
         updated_at: new Date().toISOString()
       });
 
-      let apData: {
-        resume?: string;
-        status?: string;
-        collected?: Record<string, string>;
-        response?: { resume?: string; };
-      } = {};
-
+      let apData: any = {};
       try {
+        const apPayload = { 
+          session_id, 
+          collected: cleanedCollected, 
+          user_input: user_input.trim(),
+          paragraph: user_input.trim(), // v7.9 REDUNDANCY
+          context: user_input.trim(),   // v7.9 REDUNDANCY
+          query: user_input.trim()      // v7.9 REDUNDANCY
+        };
+        
+        console.log('[API PROXY] Triggering Webhook with payload:', JSON.stringify(apPayload).slice(0, 300) + '...');
+
         const response = await fetch('https://cloud.activepieces.com/api/v1/webhooks/6ZRUJzIYQICVJLEVUmpjB', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id, collected: cleanedCollected }),
+          body: JSON.stringify(apPayload),
         });
 
         if (response.ok) {
           const text = await response.text();
+          console.log('[API PROXY] v7.9 RAW RESPONSE:', text.slice(0, 800) + (text.length > 800 ? '...' : ''));
           apData = text ? JSON.parse(text) : {};
+        } else {
+          const errText = await response.text();
+          console.error('[API PROXY] Generator Failed | Status:', response.status, '| Msg:', errText);
         }
-      } catch {
-        console.error('[API PROXY] Generator timeout/faliure.');
+      } catch (err) {
+        console.error('[API PROXY] Critical Fetch Error:', err);
       }
 
-      const rawResume = apData?.response?.resume || apData?.resume || "";
+      // v7.9 HYPER-EXTRACTION
+      const rawResume = apData?.response?.resume || 
+                        apData?.resume || 
+                        apData?.data?.resume || 
+                        apData?.output || 
+                        apData?.content ||
+                        "";
+      
       const isValid = rawResume && rawResume.length > 50;
 
+      // v7.8 SEAL COMPLETION: Only set complete if content is valid
+      if (isValid) {
+        await supabase.from('sessions').update({
+          status: 'complete',
+          response: { 
+            resume: rawResume, 
+            ats_score: 85,
+            suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || [],
+            recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || []
+          },
+          updated_at: new Date().toISOString()
+        }).eq('session_id', session_id);
+      }
+
       return NextResponse.json({
-        status: 'complete',
+        status: isValid ? 'complete' : 'error',
         response: {
-          questions: [],
+          questions: isValid ? [] : ["AI Generation was triggered, but no resume content was returned. Please check your Activepieces workflow mapping or logs."],
           resume: isValid ? rawResume : "",
           collected: cleanedCollected,
-          ats_score: isValid ? 85 : 0
+          ats_score: isValid ? 85 : 0,
+          suggested_roles: apData?.suggested_roles || apData?.response?.suggested_roles || [],
+          recommended_courses: apData?.recommended_courses || apData?.response?.recommended_courses || []
         }
       });
     }
 
-    // Ask next question
+    // If input was too short/greetings, ask for the full paragraph
     return NextResponse.json({
       status: 'questions',
       response: {
-        questions: [nextMissing.question],
+        questions: ["Please describe your full details in one paragraph (including Name, Role, Skills, etc.) so I can generate your resume."],
         collected: cleanedCollected
       },
     });
 
   } catch (error) {
     const err = error as Error;
-    console.error('[API PROXY] Internal Error:', err.message);
+    console.error('[API PROXY] Error:', err.message);
     return NextResponse.json({
       status: 'questions',
-      response: { questions: ['I encountered a small hiccup. Please try describing your experience once more.'], error: err.message }
+      response: { questions: ['I encountered an error. Please try providing your details again.'], error: err.message }
     }, { status: 200 });
   }
 }

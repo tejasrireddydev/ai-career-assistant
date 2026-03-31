@@ -5,15 +5,13 @@ import { Send, CornerDownLeft } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
 interface ChatInputProps {
-  onSendMessage: (text: string, pendingKey?: string | null) => void;
+  onSendMessage: (text: string) => void;
   isLoading: boolean;
-  pendingKey?: string | null;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
   isLoading,
-  pendingKey,
 }) => {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -21,7 +19,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input.trim(), pendingKey);
+      onSendMessage(input.trim());
       setInput("");
       if (textareaRef.current) {
         textareaRef.current.style.height = "90px"; // Reset to new compact height
