@@ -144,12 +144,14 @@ export default function ResumeSection({
         </div>
       </div>
 
-      <div className="flex-1 bg-slate-50/50 p-4 sm:p-8 lg:p-12 overflow-y-auto no-scrollbar">
+      <div className="flex-1 bg-[#f8fafc] p-4 sm:p-8 lg:p-12 overflow-y-auto no-scrollbar">
         <div 
           id="resume-to-render"
-          className="max-w-[850px] mx-auto bg-white shadow-[0_40px_100px_rgba(0,0,0,0.05)] min-h-[1100px] p-12 sm:p-20 border border-slate-100 rounded-[2.5rem]"
+          className="max-w-[850px] mx-auto bg-white shadow-[0_30px_70px_rgba(0,0,0,0.04)] min-h-[1100px] p-12 sm:p-20 border border-slate-100 rounded-[2.5rem] relative overflow-hidden"
           style={{ backgroundColor: '#ffffff', color: COLORS.TEXT_DARK }}
         >
+          {/* Subtle Document Texture */}
+          <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-[0.15] pointer-events-none" />
           {rawLines.map((line, i) => {
             const trimmed = line.trim();
             if (!trimmed) return <div key={i} className="h-4" />;

@@ -147,36 +147,22 @@ export default function Home() {
     }
   }, []);
 
-  // Centralized state updater to ensure consistency across Realtime, Polling, and API
   const syncSessionState = useCallback((updated: SessionData) => {
     if (!updated) return;
-    
-    // Update Messages if they've changed
     if (updated.messages && JSON.stringify(updated.messages) !== JSON.stringify(messages)) {
       setMessages(updated.messages);
     }
-    
-    // Update Collected Data
     if (updated.collected) setCollected(updated.collected);
-
     const parsedResponse = (typeof updated.response === "string" ? JSON.parse(updated.response) : updated.response) as SessionResponse;
     const resumeData = parsedResponse?.resume || parsedResponse?.data?.resume || parsedResponse?.response?.resume || "";
     const score = parsedResponse?.ats_score || parsedResponse?.response?.ats_score;
     const apiRoles = parsedResponse?.suggested_roles || parsedResponse?.data?.suggested_roles || parsedResponse?.response?.suggested_roles || [];
     const apiCourses = parsedResponse?.recommended_courses || parsedResponse?.data?.recommended_courses || parsedResponse?.response?.recommended_courses || [];
-
     if (resumeData && typeof resumeData === 'string' && resumeData.length > 50) {
       const { resume: clean, roles, courses } = sanitizeResume(resumeData);
-      setResume(clean);
-      setAtsScore(score || 85);
-      setSuggestedRoles(roles.length > 0 ? roles : apiRoles);
-      setRecommendedCourses(courses.length > 0 ? courses : apiCourses);
-      
-      setIsLoading(false);
-      setIsComplete(true);
-      setIsError(false);
+      setResume(clean); setAtsScore(score || 85); setSuggestedRoles(roles.length > 0 ? roles : apiRoles); setRecommendedCourses(courses.length > 0 ? courses : apiCourses);
+      setIsLoading(false); setIsComplete(true); setIsError(false);
     } else if (updated.status === 'complete' && !resumeData) {
-      // It's marked complete but no resume? Probably an extraction fail
       setIsLoading(false);
     } else if (updated.status === 'questions') {
       setIsLoading(false);
@@ -187,22 +173,15 @@ export default function Home() {
     if (!sid || sid === "booting" || !supabase.current) return;
     isSwitchingSessionRef.current = true;
     setSessionId(sid);
-    setIsLoading(false);
-    setIsComplete(false);
-    setIsError(false);
-    setGenLogs([]);
+    setIsLoading(false); setIsComplete(false); setIsError(false); setGenLogs([]);
     const { data } = await supabase.current.from("sessions").select("*").eq("session_id", sid).maybeSingle();
     if (data) {
       syncSessionState(data as SessionData);
-      lastSavedStateRef.current = { 
-        messagesStr: JSON.stringify(data.messages || []), 
-        collectedStr: JSON.stringify(data.collected || {}), 
-        resume: resume // Note: resume might be stale in this line but syncSessionState handles the state update
-      };
+      lastSavedStateRef.current = { messagesStr: JSON.stringify(data.messages || []), collectedStr: JSON.stringify(data.collected || {}), resume: resume };
     }
     if (typeof window !== "undefined") window.history.pushState({}, "", `?session=${sid}`);
     setTimeout(() => { isSwitchingSessionRef.current = false; }, 100);
-  }, [syncSessionState, sessionId, resume]);
+  }, [syncSessionState, resume]);
 
   const handleStartOver = useCallback(() => {
     isSwitchingSessionRef.current = true;
@@ -259,7 +238,6 @@ export default function Home() {
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [messages, collected, resume, persistSession, mounted, sessionId]);
 
-  // Realtime Sync Listener - Primary update mechanism
   useEffect(() => {
     if (!sessionId || sessionId === "booting" || !supabase.current) return;
     const channel = supabase.current
@@ -270,18 +248,13 @@ export default function Home() {
     return () => { if (supabase.current) supabase.current.removeChannel(channel); };
   }, [sessionId, syncSessionState]);
 
-  // Smart Polling Fallback - Secondary reliability layer (only runs while loading)
   useEffect(() => {
     if (!isLoading || !sessionId || sessionId === "booting" || !supabase.current) return;
-    
     const interval = setInterval(async () => {
       if (!supabase.current) return;
       const { data } = await supabase.current.from("sessions").select("*").eq("session_id", sessionId).maybeSingle();
-      if (data) {
-        syncSessionState(data as SessionData);
-      }
-    }, 4000); // Poll every 4s while loading as a safety net
-
+      if (data) syncSessionState(data as SessionData);
+    }, 4000);
     return () => clearInterval(interval);
   }, [isLoading, sessionId, syncSessionState]);
 
@@ -291,28 +264,19 @@ export default function Home() {
     try {
       const parsed = (typeof response === "string" ? JSON.parse(response) : response) as SessionResponse;
       if (!parsed) { if (status === 'questions') setIsLoading(false); return; }
-      
       const apiData = parsed.collected || parsed.data?.collected;
       if (apiData) setCollected(prev => ({ ...prev, ...apiData }));
-      
       let resContent = parsed?.resume || parsed?.data?.resume || parsed?.response?.resume;
       if (resContent && typeof resContent === 'string' && resContent.length > 50) {
-        // Immediate update if API payload is rich
         const { resume: cleanRes, roles, courses } = sanitizeResume(resContent);
-        setResume(cleanRes);
-        setAtsScore(parsed?.ats_score || parsed?.data?.ats_score || 85);
-        setSuggestedRoles(roles.length > 0 ? roles : (parsed?.suggested_roles || []));
-        setRecommendedCourses(courses.length > 0 ? courses : (parsed?.recommended_courses || []));
-        setIsComplete(true);
-        setIsLoading(false);
+        setResume(cleanRes); setAtsScore(parsed?.ats_score || parsed?.data?.ats_score || 85); setSuggestedRoles(roles.length > 0 ? roles : (parsed?.suggested_roles || [])); setRecommendedCourses(courses.length > 0 ? courses : (parsed?.recommended_courses || []));
+        setIsComplete(true); setIsLoading(false);
         setMessages(prev => [...prev, { role: "assistant", text: "Your professional resume is generated!" }]);
         setTimeout(persistSession, 100);
       } else {
-        // Just questions, let the UI reflect them
         const questionsFromResponse = parsed?.questions || parsed?.data?.questions || parsed?.response?.questions || [];
         if (questionsFromResponse.length > 0) {
-           setIsLoading(false);
-           setMessages(prev => [...prev, ...questionsFromResponse.map((text: string) => ({ role: "assistant" as const, text }))]);
+           setIsLoading(false); setMessages(prev => [...prev, ...questionsFromResponse.map((text: string) => ({ role: "assistant" as const, text }))]);
         }
       }
     } catch (e) { console.error("API Parsing Fail:", e); setIsLoading(false); }
@@ -346,9 +310,7 @@ export default function Home() {
       const res = await fetch("/api/webhook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, user_input: userInput, collected: newCollected }), signal: controller.signal });
       clearTimeout(timeoutId);
       const data = await res.json();
-      if (data.status === 'questions' || data.status === 'complete' || data.status === 'error') {
-        processResponse(data.status, data.response);
-      }
+      if (data.status === 'questions' || data.status === 'complete' || data.status === 'error') processResponse(data.status, data.response);
     } catch (err: any) { 
       clearTimeout(timeoutId); setIsLoading(false); 
       if (err.name === 'AbortError') { setIsError(true); setMessages(prev => [...prev, { role: "assistant", text: "Request timed out after 40 seconds." }]); }
@@ -376,7 +338,25 @@ export default function Home() {
           </header>
           <div className="flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scroll-smooth no-scrollbar">
+               {!resume && !isLoading && (
+                 <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-1000">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-[10px] font-black uppercase tracking-wider"><Sparkles className="w-3 h-3" />Next-Gen Assistant</div>
+                    <h2 className="text-4xl font-black text-slate-900 leading-[1.1] tracking-tighter">Create your resume <span className="text-blue-600">instantly.</span></h2>
+                 </div>
+               )}
                <ChatContainer messages={messages} />
+               
+               {/* "PRO RESUME READY" NOTIFICATION MOVED HERE */}
+               {isComplete && !isLoading && (
+                 <div className="flex items-center gap-4 p-5 bg-emerald-50 text-emerald-700 rounded-[2rem] border border-emerald-100 shadow-sm animate-in zoom-in-95 duration-500">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-200"><CheckCircle2 className="w-5 h-5" /></div>
+                    <div className="flex flex-col gap-0.5">
+                       <span className="text-xs font-black uppercase tracking-widest">Victory Achieved!</span>
+                       <span className="text-[11px] font-bold text-emerald-600/70">Your professional resume is ready on the right! 🚀</span>
+                    </div>
+                 </div>
+               )}
+
                {isLoading && genLogs.length > 0 && (
                  <div className="space-y-4 pt-4">
                     <div className="p-5 bg-slate-900 rounded-[2rem] text-white shadow-2xl relative overflow-hidden border border-white/10">
@@ -410,35 +390,35 @@ export default function Home() {
              </div>
           ) : (
             <div className="p-6 md:p-12 space-y-20 max-w-[1200px] mx-auto">
-              {isComplete && !isLoading && (
-                <div className="flex items-center justify-center gap-3 py-4 px-8 bg-emerald-50 text-emerald-700 rounded-3xl border border-emerald-100 shadow-sm animate-in slide-in-from-top-4 duration-700 mx-auto w-fit">
-                   <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center text-white"><CheckCircle2 className="w-5 h-5" /></div>
-                   <span className="text-xs font-black uppercase tracking-widest">Your professional resume is ready 👇</span>
-                </div>
-              )}
               <div id="resume-container">
                 <ResumeSection resume={resume} atsScore={atsScore} />
               </div>
               {(suggestedRoles.length > 0 || recommendedCourses.length > 0) && (
-                <section className="flex flex-col gap-12 pb-40 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+                <section className="flex flex-col gap-10 pb-40 animate-in fade-in slide-in-from-bottom-8 duration-1000">
                   <div className="flex items-center gap-6">
                     <div className="flex flex-col">
-                       <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Horizon Insights</h2>
-                       <div className="h-2 w-32 bg-blue-600 rounded-full mt-2" />
+                       <h3 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
+                         <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+                         Horizon Insights
+                       </h3>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Future Career Pathways</p>
                     </div>
                     <div className="flex-1 h-px bg-slate-200" />
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                     {suggestedRoles.length > 0 && (
-                      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-[0_20px_60px_-15px_rgba(37,99,235,0.06)] relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-40 h-40 bg-blue-50 rounded-full -mr-20 -mt-20 group-hover:scale-110 transition-transform duration-700" />
+                      <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-[0_30px_70px_rgba(0,0,0,0.04)] relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50/50 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-700" />
                         <div className="relative z-10">
-                           <div className="flex items-center justify-between mb-12">
-                              <h3 className="text-xs font-black text-blue-600 uppercase tracking-[0.3em] flex items-center gap-4"><Briefcase className="w-4 h-4" />Recommended Roles</h3>
+                           <div className="flex items-center justify-between mb-10">
+                              <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] flex items-center gap-3">
+                                <div className="p-2 bg-blue-50 rounded-xl"><Briefcase className="w-3.5 h-3.5" /></div>
+                                Recommended Roles
+                              </h3>
                            </div>
                            <div className="grid grid-cols-1 gap-3">
                              {suggestedRoles.map((role, i) => (
-                               <div key={i} className="flex items-center justify-between p-5 bg-slate-50/50 hover:bg-white hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-1 rounded-2xl border border-slate-100 transition-all duration-500 cursor-default group/item">
+                               <div key={i} className="flex items-center justify-between p-5 bg-slate-50/50 hover:bg-white hover:shadow-xl hover:shadow-blue-500/5 hover:-translate-y-0.5 rounded-2xl border border-slate-100/50 transition-all duration-500 cursor-default group/item">
                                  <span className="text-sm font-black text-slate-800">{role}</span>
                                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all" />
                                </div>
@@ -448,20 +428,29 @@ export default function Home() {
                       </div>
                     )}
                     {recommendedCourses.length > 0 && (
-                      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-[0_20px_60px_-15px_rgba(16,185,129,0.06)] relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-50 rounded-full -mr-20 -mt-20 group-hover:scale-110 transition-transform duration-700" />
+                      <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-[0_30px_70px_rgba(0,0,0,0.04)] relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50/50 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-700" />
                         <div className="relative z-10">
-                           <div className="flex items-center justify-between mb-12">
-                              <h3 className="text-xs font-black text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-4"><GraduationCap className="w-4 h-4" />Growth Roadmap</h3>
+                           <div className="flex items-center justify-between mb-10">
+                              <h3 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-3">
+                                <div className="p-2 bg-emerald-50 rounded-xl"><GraduationCap className="w-3.5 h-3.5" /></div>
+                                Growth Roadmap
+                              </h3>
                            </div>
-                           <div className="space-y-6">
+                           <div className="space-y-4">
                              {recommendedCourses.map((course, i) => {
                                const { url, text } = parseRoadmap(course);
                                return (
-                                 <div key={i} className="flex flex-col gap-4 p-6 bg-[#f8fafc] hover:bg-white hover:shadow-xl hover:shadow-emerald-500/5 rounded-[2rem] border border-slate-100 transition-all duration-500 group/course">
+                                 <div key={i} className="flex flex-col gap-4 p-6 bg-slate-50/50 hover:bg-white hover:shadow-xl hover:shadow-emerald-500/5 rounded-[2rem] border border-slate-100/50 transition-all duration-500 group/course">
                                    <div className="flex items-start gap-4">
                                       <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center shrink-0"><Star className={cn("w-4 h-4", i === 0 ? "text-amber-400 fill-amber-400" : "text-emerald-500")} /></div>
-                                      <div className="flex-1 pt-1"><span className="text-sm font-black text-slate-900 leading-tight block mb-1">{text}</span><div className="flex items-center gap-4"><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-emerald-500 rounded-full" />Highly Selective</span><span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-slate-300 rounded-full" />Industry Pick</span></div></div>
+                                      <div className="flex-1 pt-1">
+                                        <span className="text-sm font-black text-slate-900 leading-tight block mb-1.5">{text}</span>
+                                        <div className="flex items-center gap-4">
+                                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-emerald-500 rounded-full" />Focus Area</span>
+                                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><div className="w-1 h-1 bg-slate-300 rounded-full" />Industry Standard</span>
+                                        </div>
+                                      </div>
                                    </div>
                                    {url && (
                                      <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-3 bg-white hover:bg-emerald-600 hover:text-white text-emerald-600 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-emerald-100 hover:border-emerald-600 group/link shadow-sm">Explore Resource <ExternalLink className="w-3 h-3 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" /></a>

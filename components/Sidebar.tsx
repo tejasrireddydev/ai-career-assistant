@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { Plus, MessageSquare, Trash2, Clock, PanelLeftClose, PanelLeftOpen, Sparkles, CheckCircle2, Loader2, Calendar } from "lucide-react";
+import { Plus, MessageSquare, Trash2, Clock, ChevronsLeft, ChevronsRight, Sparkles, CheckCircle2, Loader2, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Session {
@@ -73,36 +73,18 @@ export default function Sidebar({
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className={cn(
-          "absolute -right-3 top-10 z-50 w-7 h-7 bg-white border border-slate-200 rounded-lg flex items-center justify-center shadow-lg hover:scale-110 active:scale-90 transition-all text-slate-400 hover:text-blue-600 hover:border-blue-400 group/toggle",
+          "absolute -right-3.5 top-10 z-50 w-7 h-7 bg-white border border-slate-200 rounded-lg flex items-center justify-center shadow-lg hover:scale-110 active:scale-90 transition-all text-slate-400 hover:text-blue-600 hover:border-blue-400 group/toggle",
           isCollapsed ? "rotate-0" : "rotate-0"
         )}
       >
         <div className="transition-transform duration-500 group-hover/toggle:scale-125">
-          {isCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+          {isCollapsed ? <ChevronsRight size={16} strokeWidth={2.5} /> : <ChevronsLeft size={16} strokeWidth={2.5} />}
         </div>
       </button>
 
-      {/* Primary Action Button */}
-      <div className={cn("px-4 py-8 relative transition-all duration-500", isCollapsed ? "flex justify-center" : "px-6")}>
-        <button
-          onClick={onNewChat}
-          className={cn(
-            "flex items-center gap-4 py-4 rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl shadow-slate-900/10 group overflow-hidden active:scale-95 relative",
-            isCollapsed ? "w-12 h-12 justify-center p-0" : "w-full px-8 justify-start"
-          )}
-        >
-          <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-          <Plus className={cn("w-5 h-5 shrink-0 transition-all duration-500 relative z-10", !isCollapsed && "group-hover:rotate-180")} />
-          {!isCollapsed && (
-            <span className="relative z-10 transition-all duration-700 animate-in fade-in slide-in-from-left-6 uppercase text-[10px] font-black tracking-[0.2em] whitespace-nowrap">
-              Launch New
-            </span>
-          )}
-        </button>
-      </div>
 
-      {/* Grouped History List */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-8 no-scrollbar relative">
+      {/* History List */}
+      <div className="flex-1 overflow-y-auto px-4 py-8 space-y-8 no-scrollbar relative">
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-20 transition-all opacity-20">
              <div className="w-12 h-12 border-2 border-dashed border-slate-300 rounded-[1.5rem] flex items-center justify-center">
@@ -170,7 +152,6 @@ export default function Sidebar({
                        </div>
                      )}
 
-                     {/* Delete Action - Hidden in collapsed to prevent overlap bugs */}
                      {!isCollapsed && (
                        <button
                          onClick={(e) => { e.stopPropagation(); onDeleteSession(session.session_id); }}
@@ -185,6 +166,25 @@ export default function Sidebar({
             </div>
           ))
         )}
+      </div>
+
+      {/* Footer Actions */}
+      <div className="p-4 space-y-2 relative animate-in fade-in slide-in-from-bottom-4 duration-1000">
+         <button
+            onClick={onNewChat}
+            className={cn(
+              "flex items-center gap-4 py-4 rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl shadow-slate-900/10 group overflow-hidden active:scale-95 relative",
+              isCollapsed ? "w-12 h-12 justify-center p-0" : "w-full px-8 justify-start"
+            )}
+          >
+            <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <Plus className={cn("w-5 h-5 shrink-0 transition-all duration-500 relative z-10", !isCollapsed && "group-hover:rotate-180")} />
+            {!isCollapsed && (
+              <span className="relative z-10 transition-all duration-700 animate-in fade-in slide-in-from-left-6 uppercase text-[10px] font-black tracking-[0.2em] whitespace-nowrap">
+                Launch New
+              </span>
+            )}
+          </button>
       </div>
 
       {/* Footer Profile */}
