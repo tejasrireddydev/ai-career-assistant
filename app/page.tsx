@@ -56,7 +56,8 @@ const LOG_MILESTONES = [
   { t: 5, log: "🧠 Analyzing Career DNA..." },
   { t: 8, log: "📄 Synthesizing Professional Narrative..." },
   { t: 12, log: "⚡ Optimizing ATS Vector Alignment..." },
-  { t: 15, log: "🛰️ Awaiting Final Background Sync..." },
+  { t: 15, log: "💡 TIP: Refresh page after 15s to sync results." },
+  { t: 18, log: "🛰️ Awaiting Final Background Sync..." },
 ];
 
 export default function Home() {
@@ -302,7 +303,12 @@ export default function Home() {
   const handleSendMessage = async (userInput: string) => {
     if (!userInput.trim() || isLoading) return;
     const newCollected = { ...latestCollectedRef.current, general: userInput.trim() };
-    setCollected(newCollected); setMessages(prev => [...prev, { role: "user", text: userInput }]);
+    setCollected(newCollected); 
+    setMessages(prev => [
+      ...prev, 
+      { role: "user", text: userInput },
+      { role: "assistant", text: "I'm on it! I've triggered the generator. It usually takes 15-20 seconds to finalize everything. 💡 Tip: If you don't see the result automatically, just refresh this page in a few moments." }
+    ]);
     setIsLoading(true); setIsError(false); setGenLogs(["Initializing Digital Handshake..."]); setIsComplete(false); 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 40000);

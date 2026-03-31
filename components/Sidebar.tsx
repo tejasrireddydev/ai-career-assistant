@@ -78,9 +78,28 @@ export default function Sidebar({
         )}
       >
         <div className="transition-transform duration-500 group-hover/toggle:scale-125">
-          {isCollapsed ? <ChevronsRight size={16} strokeWidth={2.5} /> : <ChevronsLeft size={16} strokeWidth={2.5} />}
+          {isCollapsed ? <ChevronsRight size={14} strokeWidth={3} /> : <ChevronsLeft size={14} strokeWidth={3} />}
         </div>
       </button>
+
+      {/* Top Action Header - Sticky */}
+      <div className={cn("px-4 py-6 border-b border-slate-100 bg-white/40 backdrop-blur-md sticky top-0 z-20 transition-all duration-500", isCollapsed ? "flex justify-center" : "px-6")}>
+        <button
+          onClick={onNewChat}
+          className={cn(
+            "flex items-center gap-4 py-4 rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl shadow-slate-900/10 group overflow-hidden active:scale-95 relative",
+            isCollapsed ? "w-12 h-12 justify-center p-0" : "w-full px-8 justify-start"
+          )}
+        >
+          <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+          <Plus className={cn("w-5 h-5 shrink-0 transition-all duration-500 relative z-10", !isCollapsed && "group-hover:rotate-180")} />
+          {!isCollapsed && (
+            <span className="relative z-10 transition-all duration-700 animate-in fade-in slide-in-from-left-6 uppercase text-[10px] font-black tracking-[0.2em] whitespace-nowrap">
+              Launch New
+            </span>
+          )}
+        </button>
+      </div>
 
 
       {/* History List */}
@@ -168,24 +187,6 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Footer Actions */}
-      <div className="p-4 space-y-2 relative animate-in fade-in slide-in-from-bottom-4 duration-1000">
-         <button
-            onClick={onNewChat}
-            className={cn(
-              "flex items-center gap-4 py-4 rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl shadow-slate-900/10 group overflow-hidden active:scale-95 relative",
-              isCollapsed ? "w-12 h-12 justify-center p-0" : "w-full px-8 justify-start"
-            )}
-          >
-            <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-            <Plus className={cn("w-5 h-5 shrink-0 transition-all duration-500 relative z-10", !isCollapsed && "group-hover:rotate-180")} />
-            {!isCollapsed && (
-              <span className="relative z-10 transition-all duration-700 animate-in fade-in slide-in-from-left-6 uppercase text-[10px] font-black tracking-[0.2em] whitespace-nowrap">
-                Launch New
-              </span>
-            )}
-          </button>
-      </div>
 
       {/* Footer Profile */}
       <div className={cn("p-6 transition-all duration-500 flex justify-center", isCollapsed ? "p-4" : "p-6")}>
